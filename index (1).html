@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Live Game Pro</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap">
+<style>
+  :root { --sangue:#8a0b0b; --osso:#e8e2c8; --tinta:#07060c; --f:'Press Start 2P',monospace; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; background:#020204; overflow:hidden; }
+  body { display:grid; place-items:center; touch-action:manipulation; }
+  #palco { position:relative; height:min(100dvh, calc(100vw * 16 / 9)); aspect-ratio:9/16; container-type:inline-size; background:var(--tinta); }
+  #game { position:absolute; inset:0; }
+  #game canvas { display:block; }
+  /* Teclado de testes (canto inferior direito) */
+  #painel { position:absolute; right:3cqw; bottom:3cqw; z-index:5; display:flex; flex-direction:column; gap:1.6cqw; width:46cqw; }
+  #painel .rot { font:2.2cqw var(--f); color:#8f8a78; text-align:right; }
+  #painel input { font:2.6cqw var(--f); color:var(--osso); background:rgba(10,8,14,.85); border:.5cqw solid #3a3a42; padding:2cqw; width:100%; }
+  #painel button { font:2.8cqw var(--f); color:var(--osso); background:rgba(10,8,14,.88); border:.6cqw solid var(--sangue); padding:3cqw 2cqw; cursor:pointer; }
+  #painel button:active { background:var(--sangue); transform:scale(.96); }
+  #painel button.boss { border-color:#d01a1a; background:rgba(60,6,10,.9); }
+  .oculto { display:none !important; }
+  /* Painel de testes só aparece depois que o jogo é liberado */
+  body:not(.jogando) #painel { display:none; }
+  #painel button.sair { font-size:2cqw; padding:1.6cqw; border-color:#3a3a42; color:#8f8a78; }
+
+  /* ===== Tela de Ativação (paywall) ===== */
+  #ativacao { position:absolute; inset:0; z-index:20; display:flex; align-items:center; justify-content:center; padding:6cqw; overflow:hidden;
+    background:linear-gradient(#05040a 0%, #150b1b 55%, #3a1018 71%, #1c1c24 71%, #1c1c24 100%); font-family:var(--f); }
+  #ativacao::before { content:""; position:absolute; top:9%; right:14%; width:16cqw; height:16cqw; border-radius:50%; background:#d9d2bd;
+    box-shadow:0 0 0 3cqw rgba(138,11,11,.14), 0 0 0 7cqw rgba(138,11,11,.08); }
+  #ativacao::after { content:""; position:absolute; left:0; right:0; top:86%; height:1.2cqw;
+    background:repeating-linear-gradient(90deg,#e0b020 0 12cqw, transparent 12cqw 20cqw); animation:rodovia 1.2s linear infinite; }
+  @keyframes rodovia { to { background-position:-20cqw 0; } }
+  @media (prefers-reduced-motion: reduce) { #ativacao::after { animation:none; } }
+  #atCard { position:relative; z-index:1; width:100%; display:flex; flex-direction:column; gap:2.4cqw; padding:6cqw;
+    background:rgba(7,6,12,.82); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); border:.8cqw solid var(--sangue); box-shadow:0 0 0 .8cqw #000, 0 2cqw 0 rgba(0,0,0,.5); }
+  #atCard h1 { margin:0; font:5.2cqw var(--f); color:var(--osso); text-align:center; text-shadow:0 .6cqw 0 var(--sangue); }
+  #atCard .sub { margin:0 0 1.5cqw; font:max(8px,2.2cqw)/1.7 var(--f); color:#8f8a78; text-align:center; }
+  #atCard label { font:max(8px,2.2cqw) var(--f); color:var(--osso); }
+  #atCard input { font:max(10px,2.8cqw) var(--f); color:var(--osso); background:#0a0810; border:.5cqw solid #3a3a42; padding:2.6cqw; width:100%; outline:none; }
+  #atCard input:focus { border-color:#d01a1a; }
+  #atErro { min-height:6cqw; font:max(8px,2.2cqw)/1.6 var(--f); color:#ff4b4b; text-align:center; }
+  #btnAtivar { font:max(10px,3cqw) var(--f); color:var(--osso); background:var(--sangue); border:.6cqw solid #d01a1a; padding:3.4cqw; cursor:pointer; }
+  #btnAtivar:hover:not(:disabled) { background:#a81010; }
+  #btnAtivar:active:not(:disabled) { transform:scale(.97); }
+  #btnAtivar:disabled { opacity:.6; cursor:wait; }
+  #atCard .venda { font:max(8px,2.2cqw)/1.7 var(--f); color:#8f8a78; text-align:center; text-decoration:none; border:.5cqw solid #3a3a42; padding:2.6cqw; cursor:pointer; }
+  #atCard .venda:hover { color:var(--osso); border-color:var(--osso); }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+</head>
+<body>
+<div id="palco">
+  <div id="game"></div>
+  <div id="painel">
+    <div class="rot">Modo de teste (H oculta)</div>
+    <input id="nomeTeste" value="Nox3m" maxlength="18" aria-label="Nome do usuário de teste">
+    <button onclick="receberPresente('comum', nomeTeste())">Simular Comum</button>
+    <button onclick="receberPresente('medio', nomeTeste())">Simular Médio</button>
+    <button class="boss" onclick="receberPresente('boss', nomeTeste())">Simular Boss</button>
+    <button class="sair" onclick="sairLicenca()">Trocar chave</button>
+  </div>
+  <div id="ativacao" role="dialog" aria-labelledby="atTitulo">
+    <form id="atCard" autocomplete="off">
+      <h1 id="atTitulo">LIVE GAME PRO</h1>
+      <p class="sub">Ative sua licença para liberar o jogo da sua live.</p>
+      <label for="inCanal">Nome do seu canal (opcional)</label>
+      <input id="inCanal" maxlength="20" placeholder="Ex.: Meu Canal" spellcheck="false" autocomplete="off">
+      <label for="inChave">Insira sua Chave de Licença</label>
+      <input id="inChave" maxlength="64" placeholder="XXXX-XXXX-XXXX" spellcheck="false" autocapitalize="off" autocomplete="off">
+      <div id="atErro" role="alert"></div>
+      <button type="submit" id="btnAtivar">Ativar Sistema</button>
+      <a id="linkVenda" class="venda" target="_blank" rel="noopener noreferrer">Ainda não tem uma chave? Assine aqui</a>
+    </form>
+  </div>
+</div>
+
+<script>
+/* ====================================================================
+   LIVE GAME PRO (Phaser 3) - pixel art desenhado por código
+   ==================================================================== */
+const W = 540, H = 960, U = 3;   // U = tamanho do "pixel" dos sprites
+const TOPO_CHAO = 690, PE_Y = 765;
+const FONTE = "'Press Start 2P', monospace";
+const SANGUE = [0x8a0b0b, 0xb01515, 0x5a0606, 0x3a0408];
+
+// Balanceamento: ajuste aqui
+const CONFIG = {
+  velTiro: 760, velChao: 70, maxInimigos: 60, tempoReinicio: 2000,
+  tipos: {
+    comum: { hp: 30,   vel: 120, escala: 1,    cor: 0xffffff, sangue: 22,  qtd: 1, recuo: 8 },
+    medio: { hp: 60,   vel: 95,  escala: 1.25, cor: 0xc4b5ff, sangue: 34,  qtd: 3, recuo: 4, arma: ['shotgun', 10000] },
+    boss:  { hp: 1000, vel: 48,  escala: 3.4,  cor: 0xff5a5a, sangue: 120, qtd: 1, recuo: 0, boss: true, arma: ['minigun', 15000] }
+  }
+};
+const ARMAS = {
+  pistola: { nome: 'PISTOLA', rank: 0, intervalo: 400, dano: 20, angulos: [0],            jitter: 0,    cor: '#e8e2c8' },
+  shotgun: { nome: 'SHOTGUN', rank: 1, intervalo: 650, dano: 25, angulos: [-0.15, 0, 0.15], jitter: 0.03, cor: '#ff9b3a' },
+  minigun: { nome: 'MINIGUN', rank: 2, intervalo: 90,  dano: 25, angulos: [0],            jitter: 0.05, cor: '#ff3b3b' }
+};
+// Variações de zumbi: pele, roupa, calça
+const PALETAS = [
+  [0x6f7d62, 0x2c2a35, 0x1d1b24], [0x8a7f6a, 0x6b1a1a, 0x23324a], [0x5b6b7d, 0x1f3a4d, 0x2a2a2a],
+  [0x7a5a4a, 0x4a3f1f, 0x1d1b24], [0x6a7d5a, 0xbdb7a3, 0x3a2f2a], [0x77806a, 0x3a1e4a, 0x1d1b24], [0x8f8a78, 0x2f4f2f, 0x2b2b33]
+];
+
+let jogo = null;
+let NOME_CANAL = 'LIVE GAME PRO';   // definido na ativação (nome do canal do usuário)
+const fila = [];  // presentes recebidos antes da cena existir ou durante a morte
+const nomeTeste = () => document.getElementById('nomeTeste').value.trim() || 'Nox3m';
+
+/* ====================================================================
+   AUTOMAÇÃO DE PRESENTES
+   O servidor Node.js (server.js) envia um JSON por presente:
+   {"tipo":"boss","usuario":"Nox3m"}  ->  receberPresente(tipo, usuario)
+   A conversão "moedas do TikTok -> comum/medio/boss" é feita no servidor.
+   ==================================================================== */
+window.receberPresente = function (tipo, nomeUsuario) {
+  try {
+    tipo = String(tipo || '').toLowerCase().replace('é', 'e');
+    if (!CONFIG.tipos[tipo]) { console.warn('Tipo de presente desconhecido:', tipo); return false; }
+    const nome = String(nomeUsuario || 'Alguém').slice(0, 18);
+    const cena = jogo && jogo.scene.getScene('MainScene');
+    if (cena && cena.pronto && !cena.morto) return cena.spawnar(tipo, nome);
+    if (fila.length < 50) fila.push({ tipo, nome });
+    return true;
+  } catch (e) { console.error('receberPresente falhou:', e); return false; }
+};
+
+/* ====================================================================
+   CONEXÃO COM O SERVIDOR (WebSocket) - reconecta sozinho a cada 3s
+   Se o servidor ainda não estiver rodando, o jogo funciona normalmente
+   (use os botões de teste) e liga assim que o servidor ficar disponível.
+   ==================================================================== */
+const URL_SERVIDOR = 'ws://localhost:8080';
+let wsTimer = null;
+function conectarServidor() {
+  clearTimeout(wsTimer);
+  let ws;
+  try { ws = new WebSocket(URL_SERVIDOR); } catch (e) { wsTimer = setTimeout(conectarServidor, 3000); return; }
+  ws.onopen = () => console.log('Conectado ao servidor de presentes:', URL_SERVIDOR);
+  ws.onmessage = ev => {
+    try { const m = JSON.parse(ev.data); receberPresente(m.tipo, m.usuario); }
+    catch (e) { console.warn('Mensagem inválida do servidor:', ev.data); }
+  };
+  ws.onerror = () => { try { ws.close(); } catch (_) {} };
+  ws.onclose = () => { wsTimer = setTimeout(conectarServidor, 3000); };
+}
+
+class MainScene extends Phaser.Scene {
+  constructor() { super('MainScene'); this.pronto = false; }
+
+  create() {
+    this.pronto = false; this.morto = false; this.mortos = 0;
+    this.fase = 0; this.tHeroi = 0; this.cd = 0; this.fluxo = 0; this.armaT = 0; this.arma = 'pistola'; this.seg = -1;
+    this.particulas = []; this.pocas = [];
+
+    this.criarTexturas();
+    this.criarCenario();
+
+    this.heroi = this.physics.add.sprite(110, PE_Y, 'heroi_a').setOrigin(0.5, 1).setDepth(PE_Y);
+    this.heroi.body.setSize(30, 66).setOffset(15, 15);
+    this.armaSpr = this.add.image(this.heroi.x + 24, this.heroi.y - 43, 'arma_pistola').setOrigin(0, 0.5).setDepth(PE_Y + 1);
+    this.clarao = this.add.image(0, 0, 'clarao').setDepth(701).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0);
+
+    this.balas = this.physics.add.group();
+    this.inimigos = this.physics.add.group();
+    this.physics.add.overlap(this.balas, this.inimigos, this.aoAcertar, null, this);
+    this.physics.add.overlap(this.heroi, this.inimigos, this.aoMorrer, null, this);
+
+    this.criarHUD();
+    this.pronto = true;
+    fila.splice(0).forEach((p, i) => this.time.delayedCall(i * 250, () => { if (!this.morto) this.spawnar(p.tipo, p.nome); }));
+  }
+
+  /* ---------- Texturas (pixel art via retângulos) ---------- */
+  criarTexturas() {
+    if (this.textures.exists('heroi_a')) return;
+    const g = this.add.graphics();
+    const rnd = new Phaser.Math.RandomDataGenerator(['live-game-pro']);
+    const R = (c, x, y, w, h) => { g.fillStyle(c); g.fillRect(x * U, y * U, w * U, h * U); };
+    const T = (k, w, h) => { g.generateTexture(k, w, h); g.clear(); };
+
+    // Herói sobrevivente (20x28): jaqueta escura, calça jeans, mochila, bandana
+    for (let f = 0; f < 2; f++) {
+      R(0x2f4a78, f ? 8 : 6, 19, 4, 7); R(0x2f4a78, f ? 10 : 11, 19, 4, f ? 6 : 7);
+      R(0x1f3454, f ? 8 : 6, 19, 1, 7); R(0x15151a, f ? 7 : 5, 26, 6, 2); R(0x15151a, f ? 10 : 11, f ? 25 : 26, 6, 2);
+      R(0x3b3226, 2, 10, 4, 8); R(0x2a231a, 2, 16, 4, 2);
+      R(0x1c1f26, 5, 9, 10, 11); R(0x2a2f3a, 5, 9, 2, 11); R(0x555a66, 10, 10, 1, 9); R(0x14161b, 5, 18, 10, 2);
+      R(0xd9a77a, 7, 2, 6, 6); R(0x2a1a10, 7, 1, 7, 3); R(0x9b1c1c, 7, 4, 7, 1); R(0x111111, 12, 5, 1, 1);
+      R(0xc08a5f, 7, 7, 6, 1); R(0x1c1f26, 12, 11, 7, 3); R(0xd9a77a, 18, 12, 2, 2);
+      T(f ? 'heroi_b' : 'heroi_a', 20 * U, 28 * U);
+    }
+    // Armas (a pistola é grande o bastante para parecer uma arma de verdade)
+    R(0x3a3d45, 0, 0, 10, 2); R(0x6b6f7a, 8, 0, 3, 2); R(0x23252b, 0, 2, 3, 4); R(0x15161a, 4, 2, 2, 1); T('arma_pistola', 11 * U, 6 * U);
+    R(0x6b6f7a, 6, 0, 14, 1); R(0x3a3d45, 6, 1, 14, 1); R(0x6b4423, 0, 1, 7, 3); R(0x4a2e18, 10, 2, 5, 1); R(0x23252b, 7, 2, 2, 2); T('arma_shotgun', 20 * U, 4 * U);
+    R(0x8a8f9a, 8, 0, 14, 1); R(0x6b6f7a, 8, 2, 14, 1); R(0x8a8f9a, 8, 4, 14, 1); R(0x2d3038, 4, 0, 5, 6); R(0x4a5a2a, 1, 3, 4, 4); R(0x23252b, 4, 6, 2, 3); R(0xd01a1a, 22, 2, 1, 1); T('arma_minigun', 23 * U, 9 * U);
+
+    // Zumbis (18x26), virados para a esquerda; 7 variações x 2 quadros
+    PALETAS.forEach(([pele, cam, cal], v) => {
+      for (let f = 0; f < 2; f++) {
+        R(cal, f ? 6 : 5, 17, 4, 8); R(cal, f ? 10 : 10, 17, 4, f ? 6 : 8); R(0x0e0e12, f ? 5 : 4, 25, 5, 1);
+        R(cam, 4, 8, 10, 10); R(0x00000040, 4, 16, 10, 2); R(0x07060c, 5, 18, 2, 1); R(0x07060c, 9, 18, 2, 1);
+        R(pele, 0, 10, 8, 2); R(pele, 0, 9, 2, 1); R(pele, 2, 14, 7, 2); R(pele, 0, 13, 2, 1);
+        R(pele, 4, 1, 8, 7); R(0x1b1a1f, v % 2 ? 4 : 5, 0, 8, 2); R(0xff2b2b, 5, 4, 1, 1); R(0xff2b2b, 8, 4, 1, 1);
+        R(0x1a0a0a, 5, 6, 4, 1); R(0x6b0a0a, 10, 11, 3, 3); R(0x6b0a0a, 6, 8, 1, 3);
+        T(`z${v}_${f}`, 18 * U, 26 * U);
+      }
+    });
+    R(0xffd27a, 0, 0, 8, 2); R(0xfff2c4, 3, 0, 5, 1); T('bala', 8 * U, 2 * U);
+    g.fillStyle(0xffd27a); g.fillCircle(12, 12, 12); T('clarao', 24, 24);
+    R(0xffffff, 0, 0, 2, 2); T('gota', 6, 6);
+    g.fillStyle(0x3a0406); g.fillEllipse(45, 15, 90, 26); g.fillStyle(0x5a0606); g.fillEllipse(45, 14, 76, 20); g.fillStyle(0x8a0b0b); g.fillEllipse(40, 12, 40, 8); T('poca', 90, 30);
+
+    // Lua
+    g.fillStyle(0x8a0b0b, 0.07); g.fillCircle(110, 110, 110); g.fillStyle(0x8a0b0b, 0.1); g.fillCircle(110, 110, 80);
+    g.fillStyle(0xd9d2bd); g.fillCircle(110, 110, 50); g.fillStyle(0xb9b29c); g.fillCircle(95, 98, 9); g.fillCircle(125, 122, 12); T('lua', 220, 220);
+
+    // Pinheiros escuros em duas camadas
+    const pinheiro = (cx, base, w, h, c) => {
+      g.fillStyle(c); g.fillRect(cx - 5, base - 40, 10, 40);
+      for (let t = 0; t < 4; t++) { const bw = w * (1 - t * 0.2), by = base - 30 - t * h * 0.22; g.fillTriangle(cx - bw / 2, by, cx + bw / 2, by, cx, by - h * 0.4); }
+    };
+    for (let i = 0; i < 8; i++) pinheiro(35 + i * 65 + rnd.between(-6, 6), 360, rnd.between(50, 70), rnd.between(130, 190), 0x171227); T('arv1', W, 360);
+    for (let i = 0; i < 5; i++) pinheiro(58 + i * 100 + rnd.between(-8, 8), 360, rnd.between(80, 100), rnd.between(230, 300), 0x0b0911); T('arv2', W, 360);
+
+    // Beira da estrada: poste de luz, carro abandonado
+    g.fillStyle(0xffd27a, 0.1); g.fillCircle(104, 30, 46); g.fillStyle(0xffd27a, 0.14); g.fillCircle(104, 30, 24);
+    R(0x1a1a22, 33, 10, 2, 50); R(0x1a1a22, 33, 9, 7, 2); R(0xffd27a, 38, 10, 4, 2);
+    R(0x15131c, 96, 40, 38, 10); R(0x15131c, 106, 32, 20, 9); R(0x2a3a58, 108, 34, 7, 6); R(0x2a3a58, 117, 34, 7, 6); R(0xd01a1a, 96, 42, 2, 3); R(0x08080c, 100, 49, 7, 4); R(0x08080c, 122, 49, 7, 4);
+    R(0x1a1a22, 150, 10, 2, 50); R(0x1a1a22, 143, 9, 8, 2); R(0x3a3a46, 143, 10, 3, 1);
+    T('beira', W, 172);
+
+    // Estrada: calçada, faixa amarela contínua, faixa tracejada e asfalto com rachaduras
+    g.fillStyle(0x161c14); g.fillRect(0, 0, W, 22); g.fillStyle(0x5a5a63); g.fillRect(0, 22, W, 8); g.fillStyle(0x3a3a42); g.fillRect(0, 30, W, 4);
+    g.fillStyle(0x1c1c24); g.fillRect(0, 34, W, 236);
+    for (let i = 0; i < 260; i++) { g.fillStyle(rnd.pick([0x26262f, 0x15151b, 0x2e2e38])); g.fillRect(rnd.between(0, W - 4), rnd.between(36, 266), rnd.pick([2, 3, 4]), 2); }
+    for (let i = 0; i < 6; i++) { g.lineStyle(2, 0x0c0c10); const x = rnd.between(20, W - 60), y = rnd.between(60, 250); g.lineBetween(x, y, x + 14, y + 5); g.lineBetween(x + 14, y + 5, x + 30, y + 3); }
+    g.fillStyle(0xe0b020); g.fillRect(0, 46, W, 4); g.fillRect(0, 54, W, 4);
+    for (let i = 0; i < 5; i++) { g.fillStyle(0xe0b020); g.fillRect(i * 108 + 14, 160, 62, 7); g.fillStyle(0xb8860b); g.fillRect(i * 108 + 14, 165, 62, 2); }
+    g.fillStyle(0x3a0b0f); g.fillRect(rnd.between(20, 300), 215, 40, 4);
+    T('estrada', W, 270);
+
+    g.destroy();
+
+    const ceu = this.textures.createCanvas('ceu', W, H), c = ceu.getContext();
+    const gr = c.createLinearGradient(0, 0, 0, TOPO_CHAO);
+    gr.addColorStop(0, '#05040a'); gr.addColorStop(0.6, '#150b1b'); gr.addColorStop(1, '#3a1018');
+    c.fillStyle = gr; c.fillRect(0, 0, W, H);
+    for (let i = 0; i < 100; i++) { c.fillStyle = `rgba(232,226,200,${rnd.realInRange(0.2, 0.8)})`; c.fillRect(rnd.between(0, W), rnd.between(0, 480), 2, 2); }
+    ceu.refresh();
+    const vig = this.textures.createCanvas('vinheta', W, H), v = vig.getContext();
+    const rg = v.createRadialGradient(W / 2, H / 2, H * 0.28, W / 2, H / 2, H * 0.72);
+    rg.addColorStop(0, 'rgba(0,0,0,0)'); rg.addColorStop(1, 'rgba(0,0,0,0.78)');
+    v.fillStyle = rg; v.fillRect(0, 0, W, H); vig.refresh();
+  }
+
+  criarCenario() {
+    this.add.image(0, 0, 'ceu').setOrigin(0).setDepth(0);
+    this.add.image(410, 190, 'lua').setDepth(1);
+    const ts = (y, h, k, d) => this.add.tileSprite(0, y, W, h, k).setOrigin(0).setDepth(d);
+    this.camadas = [
+      [ts(TOPO_CHAO - 330, 360, 'arv1', 2), 0.08], [ts(TOPO_CHAO - 340, 360, 'arv2', 3), 0.2],
+      [ts(TOPO_CHAO - 150, 172, 'beira', 4), 0.6], [ts(TOPO_CHAO + 20, 270, 'estrada', 4), 1]
+    ];
+    this.add.image(0, 0, 'vinheta').setOrigin(0).setDepth(800);
+  }
+
+  criarHUD() {
+    const base = { fontFamily: FONTE, color: '#e8e2c8', stroke: '#000', strokeThickness: 5 };
+    this.add.text(W / 2, 22, NOME_CANAL, { ...base, fontSize: Math.min(22, Math.floor(500 / NOME_CANAL.length)) + 'px', shadow: { offsetY: 3, color: '#8a0b0b', fill: true } }).setOrigin(0.5, 0).setDepth(1000);
+    this.add.text(W - 14, 76, 'Zumbis Mortos', { ...base, fontSize: '12px', strokeThickness: 4 }).setOrigin(1, 0).setDepth(1000);
+    this.txtMortos = this.add.text(W - 14, 98, '0', { ...base, fontSize: '38px', color: '#d01a1a' }).setOrigin(1, 0).setDepth(1000);
+    // UI da arma (topo esquerdo): nome + tempo restante + barra
+    this.txtArma = this.add.text(14, 76, '', { ...base, fontSize: '13px', strokeThickness: 4 }).setDepth(1000);
+    this.barraArma = this.add.graphics().setDepth(1000);
+    this.atualizarArmaHUD();
+  }
+
+  atualizarArmaHUD() {
+    const A = ARMAS[this.arma];
+    this.txtArma.setText(this.arma === 'pistola' ? 'ARMA: PISTOLA  ∞' : `ARMA: ${A.nome}  ${(this.armaT / 1000).toFixed(1)}s`).setColor(A.cor);
+    this.barraArma.clear().fillStyle(0x000000, 0.8).fillRect(12, 98, 176, 14);
+    const dur = this.armaDur || 1, pct = this.arma === 'pistola' ? 1 : Math.max(0, this.armaT / dur);
+    this.barraArma.fillStyle(parseInt(A.cor.slice(1), 16)).fillRect(14, 100, 172 * pct, 10);
+  }
+
+  aplicarArma(nome, dur) {
+    if (ARMAS[nome].rank < ARMAS[this.arma].rank) return;     // não troca por uma arma pior
+    this.arma = nome; this.armaT = this.armaDur = dur; this.cd = 0;
+    this.armaSpr.setTexture('arma_' + nome);
+    this.aviso(ARMAS[nome].nome + '!', ARMAS[nome].cor, 250);
+  }
+
+  aviso(txt, cor, y) {
+    const t = this.add.text(W / 2, y, txt, { fontFamily: FONTE, fontSize: '28px', color: cor, stroke: '#000', strokeThickness: 7 }).setOrigin(0.5).setDepth(1050).setAlpha(0);
+    this.tweens.add({ targets: t, alpha: 1, scale: { from: 1.4, to: 1 }, duration: 200, hold: 900, yoyo: true, onComplete: () => t.destroy() });
+  }
+
+  /* ---------- Presentes: spawn + texto flutuante + upgrade de arma ---------- */
+  spawnar(nome, usuario) {
+    const t = CONFIG.tipos[nome];
+    this.mostrarPresente(usuario);
+    if (t.arma) this.aplicarArma(t.arma[0], t.arma[1]);
+    for (let i = 0; i < t.qtd; i++) {
+      if (this.inimigos.countActive(true) >= CONFIG.maxInimigos) break;
+      const y = PE_Y + Phaser.Math.Between(-14, 14), v = t.boss ? 0 : Phaser.Math.Between(0, PALETAS.length - 1);
+      const z = this.inimigos.create(W + (t.boss ? 110 : 60) + i * 80, y, `z${v}_0`);
+      z.setOrigin(0.5, 1).setScale(t.escala).setDepth(y).setVelocityX(-t.vel * Phaser.Math.FloatBetween(0.9, 1.1));
+      if (t.cor !== 0xffffff) z.setTint(t.cor);
+      Object.assign(z, { tipo: t, v, hp: t.hp, hpMax: t.hp, tAnim: Phaser.Math.Between(0, 200), fase: 0, flash: 0 });
+      if (t.boss) {
+        z.barra = this.add.graphics().setDepth(950);
+        z.rotulo = this.add.text(0, 0, '', { fontFamily: FONTE, fontSize: '12px', color: '#e8e2c8', stroke: '#000', strokeThickness: 4 }).setOrigin(0.5, 1).setDepth(950);
+        this.rotularBoss(z);
+        this.cameras.main.flash(250, 90, 0, 0); this.cameras.main.shake(250, 0.006);
+        this.aviso('BOSS SURGIU!', '#d01a1a', 330);
+      }
+    }
+    return true;
+  }
+
+  mostrarPresente(usuario) {   // texto no canto esquerdo: sobe e some
+    const y = 640 - (this.fluxo++ % 4) * 30;
+    const t = this.add.text(14, y, `[${usuario}] enviou um presente!`, { fontFamily: FONTE, fontSize: '12px', color: '#e8e2c8', stroke: '#000', strokeThickness: 4 }).setDepth(1000);
+    this.tweens.add({ targets: t, y: y - 150, alpha: { from: 1, to: 0 }, duration: 2800, ease: 'Cubic.easeIn', onComplete: () => t.destroy() });
+  }
+
+  rotularBoss(z) { z.rotulo.setText('BOSS ' + Math.max(0, z.hp) + '/' + z.hpMax); }
+
+  /* ---------- Combate ---------- */
+  atirar() {
+    const A = ARMAS[this.arma], mx = this.armaSpr.x + this.armaSpr.width, my = this.armaSpr.y;
+    for (const a0 of A.angulos) {
+      const a = a0 + (A.jitter ? Phaser.Math.FloatBetween(-A.jitter, A.jitter) : 0);
+      const b = this.balas.create(mx, my, 'bala').setDepth(700).setBlendMode(Phaser.BlendModes.ADD).setRotation(a);
+      b.dano = A.dano; b.setVelocity(Math.cos(a) * CONFIG.velTiro, Math.sin(a) * CONFIG.velTiro);
+    }
+    this.clarao.setPosition(mx + 4, my).setAlpha(1).setScale(this.arma === 'minigun' ? 1.1 : 1.5);
+  }
+
+  aoAcertar(bala, z) {
+    if (!bala.active || !z.active) return;
+    const dano = bala.dano; bala.destroy();
+    z.hp -= dano;
+    this.sangue(z.x - z.displayWidth * 0.3, z.y - z.displayHeight * 0.55, 3, z.tipo.boss ? 1.4 : 0.8);
+    if (z.hp <= 0) return this.matar(z);
+    z.x += z.tipo.recuo; z.flash = 60; z.setTintFill(0xffffff);
+    if (z.rotulo) this.rotularBoss(z);
+  }
+
+  matar(z) {
+    this.sangue(z.x, z.y - z.displayHeight * 0.5, z.tipo.sangue, z.tipo.boss ? 2.2 : 1.3);
+    // Poça de sangue no asfalto: some depois de 3 segundos
+    if (this.pocas.length > 80) this.pocas.shift().destroy();
+    const p = this.add.image(z.x, z.y - 4, 'poca').setDepth(5).setScale(z.tipo.boss ? 3 : z.tipo.escala * 0.9);
+    p.vida = 3000; this.pocas.push(p);
+    if (z.tipo.boss) { this.cameras.main.shake(400, 0.014); this.cameras.main.flash(200, 120, 0, 0); }
+    if (z.barra) z.barra.destroy();
+    if (z.rotulo) z.rotulo.destroy();
+    z.destroy();
+    this.txtMortos.setText(String(++this.mortos));
+    this.tweens.add({ targets: this.txtMortos, scale: { from: 1.3, to: 1 }, duration: 160 });
+  }
+
+  aoMorrer() {
+    if (this.morto) return;
+    this.morto = true;
+    this.inimigos.getChildren().forEach(z => z.setVelocityX(0));
+    this.heroi.body.enable = false; this.armaSpr.setVisible(false);
+    this.heroi.setTint(0x66161a);
+    this.tweens.add({ targets: this.heroi, angle: -88, duration: 300, ease: 'Quad.easeIn' });
+    this.sangue(this.heroi.x, this.heroi.y - 40, 70, 1.4);
+    this.cameras.main.shake(300, 0.015); this.cameras.main.flash(200, 120, 0, 0);
+    this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.62).setDepth(1100);
+    const est = { fontFamily: FONTE, color: '#e8e2c8', stroke: '#000', strokeThickness: 6 };
+    this.add.text(W / 2, 400, 'VOCÊ MORREU', { ...est, fontSize: '34px', color: '#d01a1a' }).setOrigin(0.5).setDepth(1101);
+    this.add.text(W / 2, 462, 'Zumbis mortos: ' + this.mortos, { ...est, fontSize: '16px' }).setOrigin(0.5).setDepth(1101);
+    this.add.text(W / 2, 510, 'Reiniciando...', { ...est, fontSize: '13px', color: '#8f8a78', strokeThickness: 4 }).setOrigin(0.5).setDepth(1101);
+    this.time.delayedCall(CONFIG.tempoReinicio, () => this.scene.restart());
+  }
+
+  sangue(x, y, qtd, forca = 1) {
+    for (let i = 0; i < qtd; i++) {
+      const p = this.add.image(x, y, 'gota').setDepth(900).setTint(Phaser.Utils.Array.GetRandom(SANGUE));
+      const a = Math.random() * Math.PI * 2, v = Phaser.Math.Between(80, 380) * forca;
+      p.setScale(Phaser.Math.FloatBetween(0.8, 1.8) * Math.max(1, forca * 0.7));
+      Object.assign(p, { vx: Math.cos(a) * v, vy: Math.sin(a) * v - 140, parado: false,
+        chao: Math.max(PE_Y + Phaser.Math.Between(-12, 26), y + 4), vida: Phaser.Math.Between(700, 1600) });
+      this.particulas.push(p);
+    }
+    while (this.particulas.length > 300) this.particulas.shift().destroy();
+  }
+
+  update(time, delta) {
+    delta = Math.min(delta, 50);          // evita "teleporte" após travadas
+    const dt = delta / 1000;
+    if (!this.morto) {
+      this.camadas.forEach(([c, k]) => c.tilePositionX += CONFIG.velChao * k * dt);
+      this.tHeroi += delta;
+      if (this.tHeroi > 140) { this.tHeroi = 0; this.fase ^= 1; this.heroi.setTexture(this.fase ? 'heroi_b' : 'heroi_a'); }
+
+      // Arma: tiro automático conforme a arma equipada + contagem do upgrade
+      if (this.arma !== 'pistola' && (this.armaT -= delta) <= 0) { this.arma = 'pistola'; this.armaSpr.setTexture('arma_pistola'); this.seg = -1; this.atualizarArmaHUD(); }
+      if (this.arma !== 'pistola') { this.atualizarArmaHUD(); }
+      if ((this.cd -= delta) <= 0) { this.atirar(); this.cd = ARMAS[this.arma].intervalo; }
+      if (this.clarao.alpha > 0) this.clarao.alpha = Math.max(0, this.clarao.alpha - delta / 80);
+
+      this.inimigos.getChildren().forEach(z => {
+        z.tAnim += delta;
+        if (z.tAnim > (z.tipo.boss ? 420 : 240)) { z.tAnim = 0; z.fase ^= 1; z.setTexture(`z${z.v}_${z.fase}`); }
+        if (z.flash > 0 && (z.flash -= delta) <= 0) { z.clearTint(); if (z.tipo.cor !== 0xffffff) z.setTint(z.tipo.cor); }
+        if (z.barra) {
+          const bw = 180, bh = 16, bx = z.x - bw / 2, by = z.y - z.displayHeight - 30, pct = Math.max(0, z.hp / z.hpMax);
+          z.barra.clear().fillStyle(0x000000, 0.85).fillRect(bx - 3, by - 3, bw + 6, bh + 6)
+            .fillStyle(0x3a0608).fillRect(bx, by, bw, bh).fillStyle(0xd01a1a).fillRect(bx, by, bw * pct, bh)
+            .fillStyle(0xff6a5a, 0.5).fillRect(bx, by, bw * pct, 4);
+          z.rotulo.setPosition(z.x, by - 4);
+        }
+      });
+      const bs = this.balas.getChildren();
+      for (let i = bs.length - 1; i >= 0; i--) if (bs[i].x > W + 100 || bs[i].y < 0 || bs[i].y > H) bs[i].destroy();
+    }
+    for (let i = this.particulas.length - 1; i >= 0; i--) {
+      const p = this.particulas[i];
+      if (!p.parado) {
+        p.vy += 1100 * dt; p.x += p.vx * dt; p.y += p.vy * dt;
+        if (p.y >= p.chao) { p.y = p.chao; p.parado = true; p.setScale(p.scaleX * 1.6, p.scaleY * 0.6); }
+      } else if (!this.morto) p.x -= CONFIG.velChao * dt;
+      if ((p.vida -= delta) <= 0) { p.destroy(); this.particulas.splice(i, 1); }
+    }
+    for (let i = this.pocas.length - 1; i >= 0; i--) {   // poças acompanham o asfalto e somem em 3s
+      const p = this.pocas[i];
+      if (!this.morto) { p.x -= CONFIG.velChao * dt; p.vida -= delta; }
+      if (p.vida <= 0) { p.destroy(); this.pocas.splice(i, 1); } else if (p.vida < 700) p.alpha = p.vida / 700;
+    }
+  }
+}
+
+/* ====================================================================
+   INICIALIZAÇÃO
+   ==================================================================== */
+const iniciar = () => {
+  conectarServidor();
+  jogo = window.jogo = new Phaser.Game({
+    type: Phaser.AUTO, parent: 'game', width: W, height: H, backgroundColor: '#07060c',
+    pixelArt: true, fps: { target: 60, smoothStep: true },
+    render: { powerPreference: 'high-performance' },
+    scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+    physics: { default: 'arcade', arcade: { debug: false } },
+    scene: [MainScene]
+  });
+};
+/* ====================================================================
+   TELA DE ATIVAÇÃO (PAYWALL) - o jogo só inicia com uma licença válida
+   Servidor de licenças (Render): POST /validar-licenca
+   Envia { "chave": "..." } e espera { "valido": true } ou { "valido": false, "motivo": "..." }
+   ==================================================================== */
+const API_LICENCA = 'https://projeto-tiktok-server.onrender.com/validar-licenca';
+const LINK_VENDA = 'https://kiwify.com.br/';   // link fictício por enquanto: troque pelo link real
+const LS_CHAVE = 'lgp_chave', LS_CANAL = 'lgp_canal', NOME_PADRAO = 'LIVE GAME PRO';
+const $ = id => document.getElementById(id);
+const ls = {   // localStorage à prova de falhas (modo privado/bloqueado)
+  get: k => { try { return localStorage.getItem(k); } catch (_) { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} },
+  del: k => { try { localStorage.removeItem(k); } catch (_) {} }
+};
+
+async function validarChave(chave, ms = 60000) {
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms);
+  try {
+    const r = await fetch(API_LICENCA, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chave }), signal: ctl.signal });
+    return await r.json();
+  } finally { clearTimeout(t); }
+}
+
+let jogoIniciado = false;
+function iniciarJogo() {
+  if (jogoIniciado) return; jogoIniciado = true;
+  // Espera a fonte pixel carregar (máx. 1,5s). Sem internet, usa monospace.
+  Promise.race([document.fonts.load('16px "Press Start 2P"'), new Promise(r => setTimeout(r, 1500))]).then(iniciar, iniciar);
+}
+function definirCanal(txt) { NOME_CANAL = (txt || '').trim().slice(0, 20).toUpperCase() || NOME_PADRAO; }
+function entrar() {
+  $('ativacao').classList.add('oculto');
+  document.body.classList.add('jogando');
+  document.title = NOME_CANAL;
+  iniciarJogo();
+}
+window.sairLicenca = () => { ls.del(LS_CHAVE); location.reload(); };   // botão "Trocar chave" do painel de testes
+
+$('atCard').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  const chave = $('inChave').value.trim(), erro = $('atErro'), btn = $('btnAtivar');
+  if (!chave) { erro.textContent = 'Digite sua chave de licença.'; return; }
+  erro.textContent = ''; btn.disabled = true; btn.textContent = 'Validando...';
+  const aviso = setTimeout(() => { erro.style.color = '#8f8a78'; erro.textContent = 'Acordando o servidor... pode levar até 1 minuto.'; }, 5000);
+  try {
+    const d = await validarChave(chave);
+    if (d && d.valido === true) {
+      definirCanal($('inCanal').value);
+      ls.set(LS_CHAVE, chave); ls.set(LS_CANAL, $('inCanal').value.trim().slice(0, 20));
+      entrar();
+    } else {
+      if (d && d.motivo) console.warn('Licença recusada:', d.motivo);
+      clearTimeout(aviso); erro.style.color = ''; erro.textContent = 'Chave inválida ou assinatura expirada.';
+    }
+  } catch (e) {
+    clearTimeout(aviso); erro.style.color = ''; erro.textContent = 'Não foi possível conectar ao servidor de licenças. Tente novamente em instantes.';
+  } finally { clearTimeout(aviso); erro.style.color = ''; btn.disabled = false; btn.textContent = 'Ativar Sistema'; }
+});
+
+// Ao carregar: se já existe chave salva, vai direto ao jogo (sem pedir de novo)
+$('linkVenda').href = LINK_VENDA;
+$('inCanal').value = ls.get(LS_CANAL) || '';
+const chaveSalva = ls.get(LS_CHAVE);
+if (chaveSalva) {
+  definirCanal(ls.get(LS_CANAL)); entrar();
+  // Revalida em segundo plano: se o servidor disser que expirou, volta para a ativação.
+  // Se o servidor estiver fora do ar, o jogo continua normalmente.
+  validarChave(chaveSalva).then(d => { if (d && d.valido === false) { ls.del(LS_CHAVE); location.reload(); } }).catch(() => {});
+} else { $('inChave').focus(); }
+
+// Atalhos: 1 = comum, 2 = médio, 3 = boss, H = oculta/mostra o painel
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || !document.body.classList.contains('jogando')) return;
+  const k = e.key.toLowerCase();
+  if (k === '1') receberPresente('comum', nomeTeste());
+  if (k === '2') receberPresente('medio', nomeTeste());
+  if (k === '3') receberPresente('boss', nomeTeste());
+  if (k === 'h') document.getElementById('painel').classList.toggle('oculto');
+});
+if (new URLSearchParams(location.search).has('live')) document.getElementById('painel').classList.add('oculto'); // index.html?live
+</script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "yoru-caleb-live-server",
+  "version": "1.0.0",
+  "description": "Ponte entre a live do TikTok e o jogo de zumbis (WebSocket)",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "teste": "node server.js --teste"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "tiktok-live-connector": "^1.2.0",
+    "ws": "^8.18.0"
+  }
+}
